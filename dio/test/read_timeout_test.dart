@@ -5,7 +5,8 @@ import 'package:pedantic/pedantic.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
-const SLEEP_DURATION_AFTER_CONNECTION_ESTABLISHED = 5000;
+const TEST_CONTENT_LENGTH = 5;
+const SEND_DURATION_EACH_CHAR = 1000;
 
 HttpServer? _server;
 
@@ -22,21 +23,34 @@ Future<int> getUnusedPort() async {
 }
 
 void startServer(port) async {
+  String makeContentByLength(length) {
+    var result = '';
+
+    for (var number = 1; number <= length; number++) {
+      result += number.toString();
+    }
+
+    return result;
+  }
+
   _server = await HttpServer.bind('localhost', port);
   _server?.listen((request) {
-      const content = 'success';
-      var response = request.response;
+    var content = makeContentByLength(TEST_CONTENT_LENGTH);
+    var response = request.response;
 
-      sleep(const Duration(milliseconds: SLEEP_DURATION_AFTER_CONNECTION_ESTABLISHED));
+    response
+      ..statusCode = 200
+      ..contentLength = content.length;
 
-      response
-        ..statusCode = 200
-        ..contentLength = content.length
-        ..write(content);
+    for (var charAt = 0; charAt < content.length; charAt++) {
+      var oneChar = content[charAt];
 
-      response.close();
-      return;
-    });
+      response.write(oneChar);
+      sleep(const Duration(milliseconds: SEND_DURATION_EACH_CHAR));
+    }
+
+    response.close();
+   });
 }
 
 void stopServer() {
@@ -47,6 +61,8 @@ void stopServer() {
 }
 
 void main() {
+  const TEST_READ_TIMEOUT = TEST_CONTENT_LENGTH * SEND_DURATION_EACH_CHAR;
+
   setUp(() async {
     var port = await getUnusedPort();
     serverUrl = Uri.parse('http://localhost:$port');
@@ -55,12 +71,12 @@ void main() {
 
   tearDown(stopServer);
 
-  test('#read_timeout - catch DioError when receiveTimeout < $SLEEP_DURATION_AFTER_CONNECTION_ESTABLISHED', () async {
+  test('#read_timeout - catch DioError when receiveTimeout < $TEST_READ_TIMEOUT(ms)', () async {
     var dio = Dio();
 
     dio.options
       ..baseUrl = serverUrl.toString()
-      ..receiveTimeout = SLEEP_DURATION_AFTER_CONNECTION_ESTABLISHED - 1000;
+      ..receiveTimeout = TEST_READ_TIMEOUT - 1000;
 
     DioError error;
 
@@ -75,14 +91,14 @@ void main() {
     expect(error.type == DioErrorType.receiveTimeout, isTrue);
   });
 
-  test('#read_timeout - no DioError when receiveTimeout > $SLEEP_DURATION_AFTER_CONNECTION_ESTABLISHED', () async {
+  test('#read_timeout - no DioError when receiveTimeout > $TEST_READ_TIMEOUT(ms)', () async {
     var dio = Dio();
 
     dio.options
       ..baseUrl = serverUrl.toString()
-      ..receiveTimeout = SLEEP_DURATION_AFTER_CONNECTION_ESTABLISHED + 1000;
+      ..receiveTimeout = TEST_READ_TIMEOUT + 1000;
 
-    DioError? error;
+    DioError ? error;
 
     try {
       await dio.get('/');

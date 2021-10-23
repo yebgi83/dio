@@ -32,7 +32,7 @@ class DefaultHttpClientAdapter implements HttpClientAdapter {
           "Can't establish connection after [HttpClientAdapter] closed!");
     }
     var _httpClient = _configHttpClient(cancelFuture, options.connectTimeout);
-    var reqFuture = _httpClient.openUrl(options.method, options.uri);
+    var responseFuture = getResponse(options, requestStream, _httpClient);
 
     void _throwConnectingTimeout() {
       throw DioError(
@@ -42,25 +42,14 @@ class DefaultHttpClientAdapter implements HttpClientAdapter {
       );
     }
 
-    void _throwReceivingTimeout() {
-      throw DioError(
-        requestOptions: options,
-        error: 'Receiving data timeout[${options.receiveTimeout}ms]',
-        type: DioErrorType.receiveTimeout,
-      );
+    if (options.connectTimeout > 0) {
+      responseFuture = responseFuture
+          .timeout(Duration(milliseconds: options.connectTimeout));
     }
 
-    late HttpClientRequest request;
+    late HttpClientResponse responseStream;
     try {
-      if (options.connectTimeout > 0) {
-        request = await reqFuture
-            .timeout(Duration(milliseconds: options.connectTimeout));
-      } else {
-        request = await reqFuture;
-      }
-
-      //Set Headers
-      options.headers.forEach((k, v) => request.headers.set(k, v));
+      responseStream = await responseFuture;
     } on SocketException catch (e) {
       if (e.message.contains('timed out')) {
         _throwConnectingTimeout();
@@ -68,24 +57,6 @@ class DefaultHttpClientAdapter implements HttpClientAdapter {
       rethrow;
     } on TimeoutException {
       _throwConnectingTimeout();
-    }
-
-    request.followRedirects = options.followRedirects;
-    request.maxRedirects = options.maxRedirects;
-
-    if (requestStream != null) {
-      // Transform the request data
-      await request.addStream(requestStream);
-    }
-    var future = request.close();
-    if (options.receiveTimeout > 0) {
-      future = future.timeout(Duration(milliseconds: options.receiveTimeout));
-    }
-    late HttpClientResponse responseStream;
-    try {
-      responseStream = await future;
-    } on TimeoutException {
-      _throwReceivingTimeout();
     }
 
     var stream =
@@ -147,6 +118,28 @@ class DefaultHttpClientAdapter implements HttpClientAdapter {
       _defaultHttpClient!.connectionTimeout = _connectionTimeout;
     }
     return _defaultHttpClient!;
+  }
+
+  Future<HttpClientResponse> getResponse(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    HttpClient _httpClient
+  ) async {
+    var request = await _httpClient
+        .openUrl(options.method, options.uri);
+
+    // Set Headers
+    options.headers.forEach((k, v) => request.headers.set(k, v));
+
+    request.followRedirects = options.followRedirects;
+    request.maxRedirects = options.maxRedirects;
+
+    if (requestStream != null) {
+      // Transform the request data
+      await request.addStream(requestStream);
+    }
+
+    return request.close();
   }
 
   @override
